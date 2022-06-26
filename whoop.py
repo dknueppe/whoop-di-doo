@@ -8,9 +8,70 @@ from math import sin, cos, tau
 import numpy as np
 import numpy.linalg as la
 
+# next part stolen from here https://github.com/CadQuery/cadquery/issues/371
+
+from cadquery import Workplane
+from typing import Dict
+from math import pi
+from cadquery.occ_impl.shapes import TopAbs_Orientation, Shell, Edge
+
+
+def edge_angle_map(shell: Shell, types=["CIRCLE", "LINE"]) -> Dict[Edge, float]:
+    """returns a dictionary where the keys are edges and the values are angles
+    between the adjoining faces, with negative interior angles and positive
+    exterior angles
+
+    Note that angles are not generally well defined for edges other than
+    circles and lines. It may be well defined for some instances of other
+    edge types depending on their construction.  This could be tested for
+    heuristically, but for now I'm only returning edges for lines and
+    circles by default.
+    """
+    if not shell.Closed():
+        raise RuntimeError("Shell should be closed")
+    d = shell._entitiesFrom("Edge", "Face")
+    # seams in sphere's and cylinders only touch one face.  Also see note above:
+    d = dict((k, v) for k, v in d.items() if len(v) == 2 and k.geomType() in types)
+    out = {}
+    for e, (f0, f1) in d.items():
+        pt = e.positionAt(0)
+        v0 = f0.normalAt(pt)
+        v1 = f1.normalAt(pt)
+        a = 180 * v0.getAngle(v1) / pi
+        n = e.tangentAt(0)
+        det = (
+            n.x * (v0.y * v1.z - v0.z * v1.y)
+            - n.y * (v0.x * v1.z - v0.z * v1.x)
+            + n.z * (v0.x * v1.y - v0.y * v1.x)
+        )
+        if e.wrapped.Orientation() != TopAbs_Orientation.TopAbs_FORWARD:
+            det *= -1
+        out[e] = -a if det < 0 else a
+    return out
+
+def inside_edges(x: Workplane) -> list[Edge]:
+    """select the edges with negative angles between the faces"""
+    mappings = [edge_angle_map(s) for s in x.shells().objects if s.Closed()]
+    edges = [[k for k, v in d.items() if v < 0] for d in mappings]
+    return [e for el in edges for e in el]
+
+def outside_edges(x: Workplane) -> list[Edge]:
+    """select the edges with negative angles between the faces"""
+    mappings = [edge_angle_map(s) for s in x.shells().objects if s.Closed()]
+    edges = [[k for k, v in d.items() if v < 0] for d in mappings]
+    return [e for el in edges for e in el]
+
+def select_edges_by_angle(x: Workplane, min=-180, max=180) -> list[Edge]:
+    """select the edges with negative angles between the faces"""
+    mappings = [edge_angle_map(s) for s in x.shells().objects if s.Closed()]
+    edges = [[k for k, v in d.items() if min < v < max] for d in mappings]
+    return [e for el in edges for e in el]
+
+############ up until here https://github.com/CadQuery/cadquery/issues/371
+
 mm_per_inch = 25.4
 mat_thicc = 2
-fillet_rad = 3
+fillet_rad = 2
 
 # generate "n_holes" amount of points, that are equally spaced on a circle of
 # radius "mot_mnt_dia", placing the first one on the Y-axis facing "up".
@@ -71,7 +132,7 @@ for j in range(2):
         
         truss = ( cq.Workplane("front")
                 .sketch()
-                .trapezoid(2.85, float(length), 88)
+                .trapezoid(2.85, float(length), 88.5)
                 .finalize()
                 .extrude(mat_thicc)
                 .translate((fc_holes[i][0],float(length) / 2 + fc_holes[i][1]))
@@ -88,11 +149,72 @@ frame = frame.cut( cq.Workplane("front")
         .extrude(mat_thicc)
         .rotateAboutCenter((0,0,1), 45) )
 
-frame = frame.edges("|Z").fillet(2)
+# Loads of whilly nilly magic numbers and fiddling ahead, lost all
+# interest in making things 'parametric' and just wanted this one piece done.
+# Should refactor later.
+cam_mnt = ( cq.Workplane("front")
+        .sketch()
+        .trapezoid(20, 10, 75)
+        .finalize()
+        .extrude(mat_thicc)
+        .translate((0, fc_center_dist + 8))
+        )
+cam_mnt = cam_mnt.union( cq.Workplane("front")
+        .sketch()
+        .trapezoid(20, -3, 150)
+        .finalize()
+        .extrude(mat_thicc)
+        .translate((0, fc_center_dist + 2.5))
+        )
+c_mnt_cutout = ( cq.Workplane("front")
+        .rect(15, 2.5) 
+        .extrude(mat_thicc) )
 
-#frame = frame.edges(">Z").fillet(0.2)
-#frame = frame.edges("<Z").fillet(0.2)
+c_mnt_cutout = c_mnt_cutout.union( cq.Workplane("front")
+        .rect(15 - cos(1/8 * tau), 2.5 - cos(1/8 * tau), forConstruction=True)
+        .vertices()
+        .circle(0.5)
+        .extrude(mat_thicc))
 
+bow_tie = (cq.Workplane("front")
+        .sketch()
+        .trapezoid(2, 4, 75)
+        .finalize()
+        .extrude(mat_thicc)
+        .rotate((0,0,0), (0,0,1), 90)
+        .translate((2,0)))
+
+bow_tie = bow_tie.union(bow_tie.mirror(mirrorPlane="ZY", basePointVector=(0, 0 ,0)))
+
+frame = frame.union(cam_mnt)
+frame = frame.union(cq.Workplane("front")
+        .rect(1.5, 2 * fc_center_dist)
+        .extrude(mat_thicc))
+
+frame = frame.union(cq.Workplane("front")
+        .rect(7, 10)
+        .extrude(mat_thicc)
+        .translate((0, -fc_center_dist -10/2)))
+
+frame = frame.union(bow_tie.translate((0, -8)))
+frame = frame.union(bow_tie.translate((0, 8)))
+
+frame = frame.newObject(inside_edges(frame)).fillet(fillet_rad)
+
+zip_cutout = ( cq.Workplane("front")
+        .rect(4.7, 2) 
+        .extrude(mat_thicc) )
+
+zip_cutout = zip_cutout.union( cq.Workplane("front")
+        .rect(4.7 - cos(1/8 * tau), 2 - cos(1/8 * tau), forConstruction=True)
+        .vertices()
+        .circle(0.5)
+        .extrude(mat_thicc))
+
+frame = frame.cut(c_mnt_cutout.translate((7.5, fc_center_dist + 10)))
+frame = frame.cut(zip_cutout.translate((0, -fc_center_dist - 7.5)))
+
+frame = frame.cut(cq.Workplane("front").ellipse(7,2.5).extrude(mat_thicc).translate((0,fc_center_dist + 5)))
 for i , motor in enumerate(motor_pos):
     frame = (frame.cut(fc_mount)
                 .cut(motor_mount.rotateAboutCenter((0,0,1), i * 90 -45)
