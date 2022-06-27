@@ -113,6 +113,12 @@ motor_plates = ( cq.Workplane("front")
         .circle(4.25)
         .extrude(mat_thicc) )
 
+props = ( cq.Workplane("front")
+        .pushPoints(motor_pos)
+        .circle(prop_size / 2)
+        .extrude(4)
+        .translate((0,0,15)))
+
 frame = motor_plates
 #calculate lengths and angle of trusses for arms
 origin = (0,0,0)
@@ -178,11 +184,11 @@ c_mnt_cutout = c_mnt_cutout.union( cq.Workplane("front")
 
 bow_tie = (cq.Workplane("front")
         .sketch()
-        .trapezoid(2, 4, 75)
+        .trapezoid(3.3, 8, 80)
         .finalize()
         .extrude(mat_thicc)
         .rotate((0,0,0), (0,0,1), 90)
-        .translate((2,0)))
+        .translate((4,0)))
 
 bow_tie = bow_tie.union(bow_tie.mirror(mirrorPlane="ZY", basePointVector=(0, 0 ,0)))
 
@@ -196,8 +202,8 @@ frame = frame.union(cq.Workplane("front")
         .extrude(mat_thicc)
         .translate((0, -fc_center_dist -10/2)))
 
-frame = frame.union(bow_tie.translate((0, -8)))
-frame = frame.union(bow_tie.translate((0, 8)))
+frame = frame.union(bow_tie.translate((0, -5)))
+frame = frame.union(bow_tie.translate((0, 5)))
 
 frame = frame.newObject(inside_edges(frame)).fillet(fillet_rad)
 
@@ -214,11 +220,54 @@ zip_cutout = zip_cutout.union( cq.Workplane("front")
 frame = frame.cut(c_mnt_cutout.translate((7.5, fc_center_dist + 10)))
 frame = frame.cut(zip_cutout.translate((0, -fc_center_dist - 7.5)))
 
-frame = frame.cut(cq.Workplane("front").ellipse(7,2.5).extrude(mat_thicc).translate((0,fc_center_dist + 5)))
+frame = frame.cut(cq.Workplane("front")
+        .ellipse(7,2.5)
+        .extrude(mat_thicc)
+        .translate((0,fc_center_dist + 5)))
+
 for i , motor in enumerate(motor_pos):
     frame = (frame.cut(fc_mount)
                 .cut(motor_mount.rotateAboutCenter((0,0,1), i * 90 -45)
                 .translate((*motor, 0))))
-    
+
+### Camera mount
+
+front_plate = (cq.Workplane("front")
+        .moveTo(0, 25)
+        .rect(10, 50)
+        .moveTo(0, -3.75)
+        .rect(15.5, 7.5)
+        .moveTo(0, 23)
+        .circle(6.5)
+        .moveTo(4, 47)
+        .rect(26, 15)
+        .moveTo(3.5, 56.55)
+        .rect(15, 4.1)
+        .extrude(2)
+        .moveTo(0, 23)
+        .circle(4.95)
+        .moveTo(7, 47)
+        .rect(17, 12)
+        .moveTo(-9, 47)
+        .circle(5)
+        .moveTo(0, 19)
+        .cutBlind(2)
+        .moveTo(7, 59.6)
+        .rect(50, 2)
+        .extrude(2)
+        .moveTo(0, 18)
+        .rect(6, 34)
+        .moveTo(6.5, 56.5)
+        .circle(2.5)
+        .cutBlind(2))
+
+front_plate = front_plate.newObject(inside_edges(front_plate)).fillet(fillet_rad)
+front_plate = front_plate.cut(zip_cutout.translate((0,56.5)))
+front_plate = front_plate.cut(zip_cutout.translate((0,38)))
+front_plate = front_plate.cut(c_mnt_cutout.translate((7.5, -3.5)))
+
+cq.exporters.export(frame, "base_plate.step")
+frame = frame.add(front_plate.rotate(origin, (0,1,0), 180).rotate(origin, (1,0,0), 105).translate((0, 26, 4.2)))
 cq.exporters.export(frame, "frame.step")
+cq.exporters.export(front_plate, "front_plate.step")
 
