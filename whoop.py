@@ -110,7 +110,7 @@ motor_pos = np.array([ ( wheelbase_rad * cos((n / n_motors + 1/8) * tau),
                          for n in range(n_motors) ])
 motor_plates = ( cq.Workplane("front")
         .pushPoints(motor_pos)
-        .circle(4.25)
+        .circle(4.1)
         .extrude(mat_thicc) )
 
 props = ( cq.Workplane("front")
@@ -205,7 +205,6 @@ frame = frame.union(cq.Workplane("front")
 frame = frame.union(bow_tie.translate((0, -5)))
 frame = frame.union(bow_tie.translate((0, 5)))
 
-frame = frame.newObject(inside_edges(frame)).fillet(fillet_rad)
 
 zip_cutout = ( cq.Workplane("front")
         .rect(4.7, 2) 
@@ -224,6 +223,16 @@ frame = frame.cut(cq.Workplane("front")
         .ellipse(7,2.5)
         .extrude(mat_thicc)
         .translate((0,fc_center_dist + 5)))
+
+for i , motor in enumerate(motor_pos):
+    frame = frame.union( cq.Workplane("front")
+            .polygon(3, 14)
+            .extrude(mat_thicc)
+            .edges("|Z").fillet(2)
+            .rotateAboutCenter((0,0,1), i * 90 +180 -135)
+            .translate((*motor, 0)))
+
+frame = frame.newObject(inside_edges(frame)).fillet(fillet_rad)
 
 for i , motor in enumerate(motor_pos):
     frame = (frame.cut(fc_mount)
